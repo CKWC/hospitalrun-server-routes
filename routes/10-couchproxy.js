@@ -55,5 +55,16 @@ module.exports = function(app, config) {
 
   }
   loadConfigs();
-  app.use('/db/', forward(config.couchDbURL, config, true));
+
+  var forwarded = forward(config.couchDbURL, config, true);
+  app.use('/db/', function (req, res) {
+    if (config.isMultitenancy) {
+      if (req.url.startsWith('/main/')) {
+        var subdomain = req.subdomains.join('.');
+        req.url = '/' + subdomain + req.url.substring(5);
+      }
+    }
+
+    return forwarded(req, res);
+  });
 };

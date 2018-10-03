@@ -44,11 +44,15 @@ function _createMapFunction(type, query) {
   };
 }
 
-function slowSearch(pattern, dburl) {
+function slowSearch(pattern, config) {
   return function(req, res) {
     var model = req.url.match(pattern)[1];
     var parsedURL = url.parse(req.url, true);
-    var searchUrl = dburl + '/main/_temp_view/?include_docs=true';
+    var dbName = "main";
+    if (config.isMultitenancy) {
+      dbName = req.subdomains.join('.');
+    }
+    var searchUrl = config.couchAuthDbURL + '/' + dbName + '/_temp_view/?include_docs=true';
     var query = parsedURL.query.q;
     var queryParts = query.split(' OR ');
     var size =  parsedURL.query.size;
@@ -72,6 +76,6 @@ module.exports = function(app, config) {
   if (config.searchURL) {
     app.use(searchPath, forward(config.searchURL, config));
   } else {
-    app.use(searchPath, slowSearch(/\/hrdb\/(.*)\/_search\?q=(.*)/, config.couchAuthDbURL));
+    app.use(searchPath, slowSearch(/\/hrdb\/(.*)\/_search\?q=(.*)/, config));
   }
 };
