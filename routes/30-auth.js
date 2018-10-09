@@ -207,6 +207,8 @@ module.exports = function(app, config) {
   //   redirecting the user to google.com.  After authorization, Google
   //   will redirect the user back to this application at /auth/google/callback
   router.get('/auth/google', function (req, res) {
+    console.log('google auth request for: ' + req.hostname);
+
     passport.authenticate('google', {
       state: req.hostname,
       scope: ['https://www.googleapis.com/auth/userinfo.profile',
