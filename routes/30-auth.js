@@ -102,7 +102,8 @@ module.exports = function(app, config) {
     });
   }
 
-  function findOAuthUser(accessToken, refreshToken, profile, callback) {
+  function findOAuthUser(request, accessToken, refreshToken, profile, callback) {
+    var hostname = request.query.state;
     var userKey = 'org.couchdb.user:' + profile.emails[0].value;
     users.get(userKey, {}, function(err, body) {
       if (err) {
@@ -192,7 +193,8 @@ module.exports = function(app, config) {
         clientID: config.googleClientId,
         clientSecret: config.googleClientSecret,
         callbackURL: config.serverURL + '/auth/google/callback',
-      }, findOAuthUser)
+        passReqToCallback: true
+    }, findOAuthUser)
   );
 
   // Initialize Passport!  Also use passport.session() middleware, to support
@@ -204,13 +206,13 @@ module.exports = function(app, config) {
   //   request.  The first step in Google authentication will involve
   //   redirecting the user to google.com.  After authorization, Google
   //   will redirect the user back to this application at /auth/google/callback
-  router.get('/auth/google',
-    passport.authenticate('google', {scope: ['https://www.googleapis.com/auth/userinfo.profile',
-                                              'https://www.googleapis.com/auth/userinfo.email',],}),
-    function() {
-      // The request will be redirected to Google for authentication, so this
-      // function will not be called.
-    });
+  router.get('/auth/google', function (req, res) {
+    passport.authenticate('google', {
+      state: req.hostname,
+      scope: ['https://www.googleapis.com/auth/userinfo.profile',
+        'https://www.googleapis.com/auth/userinfo.email',],
+    })(req, res);
+  });
 
   // GET /auth/google/callback
   //   Use passport.authenticate() as route middleware to authenticate the
@@ -221,7 +223,14 @@ module.exports = function(app, config) {
     passport.authenticate('google', {failureRedirect: '/#/login'}),
     function(req, res) {
       var user = req.user;
-      var redirURL = '/#/finishgauth/';
+      var hostname = req.query.state;
+
+      redirURL = '';
+      if (config.isMultitenancy) {
+        redirURL += 'https://' + hostname;
+      }
+
+      redirURL += '/#/finishgauth/';
       redirURL += user.consumer_secret;
       redirURL += '/' + user.token_secret;
       redirURL += '/' + user.consumer_key;
