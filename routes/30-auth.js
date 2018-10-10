@@ -44,10 +44,27 @@ function validateOAuth(oauth) {
 
 
 
-function getPrimaryRole(user) {
+function getPrimaryRole(config, user, subdomain) {
   var primaryRole = '';
+
   if (user.roles) {
-    user.roles.forEach(function(role) {
+    user.roles.forEach(function (role) {
+
+      var p = role.indexOf('.');
+      if (config.isMultitenancy && p >= 0) {
+
+        var db = role.substr(0, p);
+        console.log(db);
+        if (db !== subdomain) {
+          return;
+        }
+
+        role = role.substr(p + 1);
+
+      } else if (p >= 0) {
+        return;
+      }
+
       if (role !== 'user' && role !== 'admin') {
         primaryRole = role;
       }
@@ -149,8 +166,11 @@ module.exports = function(app, config) {
   }
 
   function getSession(req, res, requestOptions, includeOauth) {
-    requestOptions.url = config.couchDbURL +'/_session';
+    var subdomain = req.subdomains.join('.');
+
+    requestOptions.url = config.couchDbURL + '/_session';
     request(requestOptions, function (error, response, body) {
+
       if (error) {
         res.json({error: true, errorResult: error});
       } else {
@@ -165,7 +185,7 @@ module.exports = function(app, config) {
               var response = {
                 displayName: user.displayName,
                 prefix: user.userPrefix,
-                role: getPrimaryRole(user)
+                role: getPrimaryRole(config, user, subdomain)
               };
               if (includeOauth) {
                 response.k =  user.consumer_key;
