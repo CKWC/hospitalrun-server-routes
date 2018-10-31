@@ -62,6 +62,9 @@ module.exports = function(app, config) {
       if (req.url.startsWith('/main/')) {
         var subdomain = req.subdomains.join('.');
         req.url = '/' + subdomain + req.url.substring(5);
+      } else if (req.url === '/main') {
+        var subdomain = req.subdomains.join('.');
+        req.url = '/' + subdomain;
       }
     }
 
