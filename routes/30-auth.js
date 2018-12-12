@@ -3,76 +3,7 @@ var bodyParser = require('body-parser');
 var express = require('express');
 var expressSession = require('express-session');
 var passport = require('passport');
-var serializer = require('serializer');
-var request = require('request');
-
-function createSecret(secretBase) {
-  var encryptKey = serializer.randomString(48);
-  var validateKey = serializer.randomString(48);
-  var secretString = serializer.secureStringify(secretBase, encryptKey, validateKey);
-  if (secretString.length > 80) {
-    secretString = secretString.substr(30,50);
-  }
-  return secretString;
-}
-
-function denormalizeOAuth(user) {
-  var key;
-  for (key in user.oauth.consumer_keys) {
-    user.consumer_key = key;
-    user.consumer_secret = user.oauth.consumer_keys[key];
-    break;
-  }
-  for (key in user.oauth.tokens) {
-    user.token_key = key;
-    user.token_secret = user.oauth.tokens[key];
-    break;
-  }
-  return user;
-}
-
-function validateOAuth(oauth) {
-  try {
-    if (Object.keys(oauth.consumer_keys).length > 0 && Object.keys(oauth.tokens).length > 0) {
-      return true;
-    }
-  } catch (ex) {
-    // Oauth is bad, just let the false return;
-  }
-  return false;
-}
-
-
-
-function getPrimaryRole(config, user, subdomain) {
-  var primaryRole = '';
-
-  if (user.roles) {
-    user.roles.forEach(function (role) {
-
-      var p = role.indexOf('.');
-      if (config.isMultitenancy && p >= 0) {
-
-        var db = role.substr(0, p);
-        console.log(db);
-        if (db !== subdomain) {
-          return;
-        }
-
-        role = role.substr(p + 1);
-
-      } else if (p >= 0) {
-        return;
-      }
-
-      if (role !== 'user' && role !== 'admin') {
-        primaryRole = role;
-      }
-    });
-  }
-  return primaryRole;
-}
-
+var makeAuth = require('../auth.js');
 
 // Passport session setup.
 //   To support persistent login sessions, Passport needs to be able to
@@ -90,119 +21,16 @@ passport.deserializeUser(function(obj, done) {
 });
 
 module.exports = function(app, config) {
+
+  var auth = makeAuth(config);
+
   /*eslint new-cap: ["error", { "capIsNewExceptions": ["Router"] }]*/
   var router = express.Router();
-  var nano = require('nano')(config.couchAuthDbURL);
-  var users = nano.use('_users');
   router.use(bodyParser.json());
   router.use(bodyParser.urlencoded({
     extended: true
   }));
   router.use(expressSession({secret: 'health matters', resave: true, saveUninitialized: false}));
-
-
-  function createOAuthTokens(secretBase, user, callback) {
-    var consumerKey = serializer.randomString(96);
-    var tokenKey = serializer.randomString(96);
-    user.oauth = {
-      consumer_keys: {},
-      tokens: {},
-    };
-    user.oauth.consumer_keys[consumerKey] = createSecret(secretBase);
-    user.oauth.tokens[tokenKey] = createSecret(secretBase);
-    users.insert(user, user._id, function(err, response) {
-      if (err || !response.ok) {
-        callback(response);
-      } else {
-        callback(null, denormalizeOAuth(user));
-      }
-    });
-  }
-
-  function findOAuthUser(request, accessToken, refreshToken, profile, callback) {
-    var hostname = request.query.state;
-    var userKey = 'org.couchdb.user:' + profile.emails[0].value;
-    users.get(userKey, {}, function(err, body) {
-      if (err) {
-        if (err.error && err.error === 'not_found') {
-          callback(null, false);
-        } else {
-          callback(err);
-        }
-        return;
-      }
-      if (body.deleted) {
-        callback(null, false);
-        return;
-      }
-      if (validateOAuth(body.oauth)) {
-        callback(null, denormalizeOAuth(body));
-      } else {
-        createOAuthTokens(accessToken, body, callback);
-      }
-    });
-  }
-
-  function findUser(userName, callback) {
-    var userKey = userName;
-    if (userKey.indexOf('org.couchdb.user:') !== 0) {
-      userKey = 'org.couchdb.user:' + userKey;
-    }
-    users.get(userKey, {}, function(err, body) {
-      if (err) {
-        callback(err);
-        return;
-      }
-      if (body && body.deleted) {
-        callback(true);
-        return;
-      }
-      if (validateOAuth(body.oauth)) {
-        callback(null, denormalizeOAuth(body));
-      } else {
-        createOAuthTokens(serializer.randomString(48), body, callback);
-      }
-    });
-  }
-
-  function getSession(req, res, requestOptions, includeOauth) {
-    var subdomain = req.subdomains.join('.');
-
-    requestOptions.url = config.couchDbURL + '/_session';
-    request(requestOptions, function (error, response, body) {
-
-      if (error) {
-        res.json({error: true, errorResult: error});
-      } else {
-        var userSession = JSON.parse(body);
-        var userDetails = userSession.userCtx || userSession;
-        if (userDetails.name === req.body.name) {
-          // User names match; we should respond with requested info
-          findUser(userDetails.name, function(err, user) {
-            if (err) {
-              res.json({error: true, errorResult: err});
-            } else {
-              var response = {
-                displayName: user.displayName,
-                prefix: user.userPrefix,
-                role: getPrimaryRole(config, user, subdomain)
-              };
-              if (includeOauth) {
-                response.k =  user.consumer_key;
-                response.s1 = user.consumer_secret;
-                response.t = user.token_key;
-                response.s2 = user.token_secret;
-              }
-              res.json(response);
-            }
-          });
-        } else {
-          // User names don't match, throw error!
-          res.json({error: true, errorResult: 'You are not authorized'});
-        }
-      }
-    });
-  }
 
   // Use the GoogleStrategy within Passport.
   //   Strategies in Passport require a `verify` function, which accept
@@ -214,7 +42,7 @@ module.exports = function(app, config) {
         clientSecret: config.googleClientSecret,
         callbackURL: config.serverURL + '/auth/google/callback',
         passReqToCallback: true
-    }, findOAuthUser)
+    }, auth.findOAuthUser)
   );
 
   // Initialize Passport!  Also use passport.session() middleware, to support
@@ -262,6 +90,13 @@ module.exports = function(app, config) {
       res.redirect(redirURL);
     }
   );
+
+  function getSession(req, res, requestOptions, includeOauth) {
+    return auth.getSession(req, requestOptions, includeOauth, req.body.name,
+      function (response) {
+        res.json(response);
+      });
+  }
 
   router.post('/auth/login', function(req, res) {
     var requestOptions = {

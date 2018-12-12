@@ -1,4 +1,5 @@
 var forward = require('../forward.js');
+var makeAuth = require('../auth.js');
 
 var CONFIGS_TO_LOAD = {
   'config_disable_offline_sync': 'disableOfflineSync',
@@ -11,6 +12,8 @@ var CONFIGS_TO_LOAD = {
 module.exports = function(app, config) {
   var nano = require('nano')(config.couchAuthDbURL);
   var configDB = nano.use('config');
+  var auth = makeAuth(config);
+
   function loadConfigs() {
     var configIds = Object.keys(CONFIGS_TO_LOAD);
     configDB.fetch({keys: configIds}, (err, configValues) => {
@@ -55,6 +58,27 @@ module.exports = function(app, config) {
 
   }
   loadConfigs();
+
+  if (config.isMultitenancy) {
+
+    app.get(['/db/_users', '/db/_users/*'], function (req, res) {
+      // proxy calls to db/_users
+      var subdomain = req.subdomains.join('.');
+
+      auth.getAuthenticatedUser(req, function (response) {
+        if (response && response.role && (response.role === 'System Administrator' ||
+          response.role === 'User Administrator')) {
+
+          // download all users from the db and filter out users not authorized to this 
+          // database and only show their role for this db.
+          auth.findUsersForDB(subdomain, function (err, body) {
+            res.json(err || body);
+          });
+        }
+      });
+
+    });
+  }
 
   var forwarded = forward(config.couchDbURL, config, true);
   app.use('/db/', function (req, res) {
