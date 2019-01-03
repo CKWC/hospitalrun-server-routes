@@ -65,6 +65,32 @@ function getPrimaryRole(config, user, subdomain) {
   return primaryRole;
 }
 
+function getRoles(config, user, subdomain) {
+  var roles =  [];
+  if (user.roles) {
+    user.roles.forEach(function (role) {
+
+      var p = role.indexOf('.');
+      if (config.isMultitenancy && p >= 0) {
+
+        var db = role.substr(0, p);
+        if (db !== subdomain) {
+          return;
+        }
+
+        role = role.substr(p + 1);
+
+      } else if (p >= 0) {
+        return;
+      }
+
+      roles.push(role);
+    });
+  }
+
+  return roles;
+}
+
 module.exports = function (config) {
 
   var nano = require('nano')(config.couchAuthDbURL);
@@ -207,8 +233,8 @@ module.exports = function (config) {
         var rows = [];
 
         response.rows.forEach(row => {
-          var role = getPrimaryRole(config, row.doc, subdomain);
-          if (role && role !== '') {
+          var roles = getRoles(config, row.doc, subdomain);
+          if (roles && roles.length > 0) {
 
             const { _id, _rev, derived_key, deleted, displayName, email, iterations, name, password,
               password_scheme, password_sha, type, salt, userPrefix  } = row.doc;
@@ -219,9 +245,7 @@ module.exports = function (config) {
               rev: _rev,
               derived_key, deleted, displayName, email, iterations, name, password,
               password_scheme, password_sha, type, salt, userPrefix,
-              roles: [
-                role
-              ]
+              roles: roles
             };
 
             rows.push(row);
@@ -245,6 +269,9 @@ module.exports = function (config) {
     findUsersForDB: findUsersForDB,
     getPrimaryRole: function (user, subdomain) {
       return getPrimaryRole(config, user, subdomain);
+    },
+    getRoles: function (user, subdomain) {
+      return getRoles(config, user, subdomain);
     }
   };
 };
